@@ -4,15 +4,15 @@ r=redis.Redis(host="127.0.0.1",port=6379,decode_responses=True)
 
 print(r.get("dfsdf"))
 print(r.keys())
-print(r.keys("t1*"))
 
 for key in r.keys():
+    #print(key+" "+r.type(key))
     if r.type(key) == "string":
         print(key+":",r.get(key))
     elif r.type(key) == "list":
         print(key+":",r.lrange(key,0,100))
 
-r.flushall()
+#r.flushall()
 
 '''
 #r.set("test","python_redis")

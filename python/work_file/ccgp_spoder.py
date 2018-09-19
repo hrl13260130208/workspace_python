@@ -47,9 +47,9 @@ class Put_Thread(threading.Thread):
                 break
 
 class Get_Thread(threading.Thread):
-    def __init__(self,fun=None,names=None,num=None):
+    def __init__(self,file=None,names=None,num=None,):
         threading.Thread.__init__(self)
-        self.fun=fun
+        self.file=file
         self.names=names
         self.num=num
 
@@ -64,7 +64,7 @@ class Get_Thread(threading.Thread):
 
                 if not redis_.llen(list_name) == 0:
                     url = get_url_redis(list_name)
-                    get_url_1(url)
+                    get_url_1(url,self.file)
                 else:
                     done_name_value = self.names.get_done_name_value( self.names.get_done_name( self.num ) )
                     if done_name_value=="True":

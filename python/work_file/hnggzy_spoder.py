@@ -7,7 +7,7 @@ import threading
 from bs4 import BeautifulSoup
 import time
 import redis
-
+import random
 '''
 此爬虫使用了redis和生产者消费者模式，程序执行方式如下：
     首先启动一个put_thread，其需要一个初始页面的url、管理name的names对象、表示第几层的num
@@ -47,12 +47,12 @@ class Put_Thread(threading.Thread):
                 break
 
 class Get_Thread(threading.Thread):
-    def __init__(self,fun=None,names=None,num=None):
+    def __init__(self,fun=None,names=None,num=None,file=None):
         threading.Thread.__init__(self)
         self.fun=fun
         self.names=names
         self.num=num
-
+        self.file=file
     def run(self):
         print("Get_Thread start...")
         condition=self.names.get_condition(self.num-1)
@@ -64,9 +64,9 @@ class Get_Thread(threading.Thread):
 
                 if not redis_.llen(list_name) == 0:
                     url = get_url_redis(list_name)
-                    get_url_1(url)
+                    get_url_1(url,self.file)
                 else:
-                    done_name_value = self.names.get_done_name_value( self.names.get_done_name( self.num ) )
+                    done_name_value = self.names.get_done_name_value( self.names.get_done_name( self.num-1 ) )
                     if done_name_value=="True":
                         break
                     condition.wait()
@@ -188,7 +188,20 @@ def clear_all(names):
 使用方法：将方法放入对应的thread的run方法的相应位置
 '''
 def put_url_0(url):
-    print("请编写方法")
+    urls = []
+    print("put_url_0 run...")
+    for i in range(122):
+        print("next page ...")
+        url = "http://www.hnggzy.com/hnsggzy/jyxx/002001/002001001/?Paging=" + str(i)
+        time.sleep(8*random.random())
+        html=get_html(url)
+        soup = BeautifulSoup(html, "html.parser")
+        for div_tag in soup.find_all("div", style="height:530px;"):
+            for a_tag in div_tag.find_all("a"):
+                urls.append("http://www.hnggzy.com"+a_tag["href"])
+    print("put_url_0 finsh...")
+    return urls
+
 
 
 #获取各个地区内公告的URLs
@@ -197,33 +210,46 @@ def middle_url_1(names,num):
 
 
 #获取公告内的详细信息
-def get_url_1(names):
-    print("请编写方法")
+def get_url_1(url,file):
+    print(url+"  start...")
+    time.sleep(8*random.random())
+    html = get_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+    table_tag =soup.find_all("table", width="887")[0]
+    title= table_tag.find_all("td", height="76")[0].get_text().strip().replace("\n", "")
+    date=table_tag.find_all("td", height="30")[0].get_text().strip().replace("\n", "")[10:19]
+    text= table_tag.find_all("td", style="padding:26px 40px 10px;")[0].get_text().strip().replace("\n", "")
+
+    file.write(url + "##" + date + "##" + title + "##" + text + "\n")
 
 
+def get_html(url):
+    data = requests.get( url )
+    data.encoding = 'gb2312'
+    data = data.text
+    return data
 
 
 
 if __name__ == '__main__':
     print("start")
-
-
-    '''
     
     #用法示例
     
-    url = "http://cz.fjzfcg.gov.cn/3500/openbidlist/f9ebc6637c3641ee9017db2a94bfe5f0/"
+    url = " "
+    file_path = "C:/file/ResultFile/hnggzy_spider_result.txt"
 
-    names=Name_Manager("t1",3)
+    names=Name_Manager("hnggzy",2)
     thread=[]
+    f = open(file_path, "a+", encoding="utf-8")
 
     p=Put_Thread(names=names,num=0,url=url)
-    m=Middle_Thread(names=names,num=1)
-    g=Get_Thread(names=names,num=2)
+    #m=Middle_Thread(names=names,num=1)
+    g=Get_Thread(names=names,num=1,file=f)
 
     thread.append(p)
-    thread.append( m )
+    #thread.append( m )
     thread.append( g )
-    check_schedule(names,3,thread)
+    check_schedule(names,2,thread)
 
-'''
+
