@@ -1,10 +1,13 @@
 
 import spider.spider_modules.thread_factory as factory
-import spider.spider_modules.name_manager as  nm
+import spider.spider_modules.name_manager as  name_manager
 import threading
+import logging
+import time
 
 
-
+logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger=logging.getLogger("logger")
 class Job(object):
     def __init__(self,name):
         self.name=name
@@ -23,7 +26,7 @@ class Job(object):
     def set_speed(self):
         '''
         设置一个快速模式：
-            当程序启动或某个线程结束时，会检查redis中的靠前的url的list大小，若大于500，
+            当程序启动或某个线程结束时，会检查redis中的靠前的url的list大小，若大于1000，
             则再启动几个对应的线程（线程最多同时执行4个）
         :return:
         '''
@@ -46,12 +49,13 @@ class Job(object):
         if threads:
             #导入python文件，获取传入线程的class对象，并设置到factory中
             f = __import__("spider.spider_thread."+self.pyname, fromlist=True)
-            self.t_factory=factory.Thread_Factor()
+
+            self.nm = name_manager.Name_Manager(self.name,threads.__len__())
+            self.t_factory = factory.Thread_Factor(self.nm)
             for t_name in threads:
                 thread=getattr(f,t_name)
                 self.t_factory.set_thread(thread)
             self.execut()
-
         else:
             raise ValueError("请设置要执行的线程名")
 
@@ -62,66 +66,43 @@ class Job(object):
 
         :return:
         '''
-        condition=threading.Condition()
-        names=nm.Name_Manager(self.name,self.t_factory.threads_len(),condition)
-        self.t_factory.set_names(names)
-        print("线程启动...")
-        self.check_schedule(names)
-        if self.speed:
-            try:
-                self.start_more(names)
-            except SystemExit as e:
-                if e.code == 1:
-                    print("爬虫即将完成，不在启动新线程！")
+        logger.info("线程启动...")
+        self.check_schedule()
+
+        while (True):
+            done = self.nm.get_done_value(self.done_num)
+            if done == "True":
+                if self.done_num == self.t_factory.threads_len()-1:
+                    logger.info("爬虫完成，退出！")
+                    self.nm.clear_keys()
+                    exit(0)
                 else:
-                    e.with_traceback()
+                    self.done_num += 1
+                    # if self.speed:
+                    #     self.start_more()
+            time.sleep(60)
 
-        while True:
-            condition.acquire()
-            print("主线程等待...")
-            condition.wait()
-            self.thread_num -=1
 
-            if self.speed:
-                try:
-                    self.start_more(names)
-                except SystemExit as e:
-                    if e.code == 1:
-                        print("爬虫即将完成，不再启动新线程！")
-                    else:
-                        e.with_traceback()
-            print("线程数："+str(self.thread_num))
-            if self.thread_num == 0:
-                break
 
-        print("爬虫完成，退出！")
-        exit(0)
 
-    def start_more(self,names):
+
+    def start_more(self):
         '''
         根据线程数和url的量来判断是否启用新的线程
         :param names:
         :return:
         '''
-        print("start_more 执行！")
-        while(True):
-            if self.done_num == names.get_num():
-                exit(1)
-            done = names.get_done_name_value(names.get_done_name(self.done_num))
-            if  done == "True":
-               self.done_num+=1
-            else:
-                break
+        logger.info("start more threads！")
 
-        list_len=names.get_list_len(names.get_list_name(self.done_num))
-        if list_len >500:
+        list_len=self.nm.get_list_len(self.done_num)
+        if list_len >1000:
             while self.thread_num < 4:
                 thread=self.t_factory.get_thread(self.done_num)
                 self.thread_num += 1
                 thread.start()
 
 
-    def check_schedule(self, names):
+    def check_schedule(self):
         '''
         当程序重新启动的时候，检查之前程序爬取的进度，然后根据其进度启动对应的线程
 
@@ -130,113 +111,24 @@ class Job(object):
         :param thread: 包含所有线程的list
         :return:
         '''
-        if names.is_not_exits():
-            print("check_schedule create")
-            names.create()
+        if self.nm.is_not_exits():
+            logger.info("check_schedule create!")
+            self.nm.create()
 
         num=self.t_factory.threads_len()
 
         for i in range(num):
-            done = names.get_done_name_value(names.get_done_name(i))
+            done = self.nm.get_done_value(i)
 
             if done == "True":
                 self.done_num=i+1
                 if i==num:
-                    print("spider is done!")
+                    logger.info("spider is done!")
                     exit(0)
             else:
                 if i == 0:
-                    names.clear_all()
-                    names.create()
+                    self.nm.clear_keys()
+                    self.nm.create()
                 thread=self.t_factory.get_thread(i)
                 thread.start()
-                self.thread_num +=1
-
-
-    """
-    file=None
-    python_file_name=""
-    class_list={}
-
-    def set_python_file_name(self,name):
-        self.python_file_name=name
-
-    def set_class(self,class_):
-        self.class_list.setdefault(self.class_list.__len__(),class_)
-
-    def start(self,names):
-
-        if names.is_not_exits():
-            print("check_schedule create")
-            names.create()
-
-        self.create_thread(names)
-
-        '''        if threadings:
-            self.check_schedule(names,threadings.__len__(),threadings)
-        else:
-            print("请输入要执行的线程！")
-
-
-    def thread_indexs(self,class_list,names):
-        num=[]
-        for i in class_list:
-            done = names.get_done_name_value(names.get_done_name(i))
-            if done == "True":
-                pass
-            else:
-                num.append(i)
-        return num
-'''
-
-    def create_thread(self,  names):
-        spider_file=__import__("spider_modules.spider_thread."+self.python_file_name,fromlist=True)
-        for i in self.class_list:
-            done = names.get_done_name_value(names.get_done_name(i))
-            if done == "True":
-                pass
-            else:
-                spider=getattr(spider_file,self.class_list.get(i))
-                spider(names,i,self.class_list.__len__()).start()
-
-
-    def check_schedule(self,names, num, thread):
-        '''
-        当程序重新启动的时候，检查之前程序爬取的进度，然后根据其进度启动对应的线程
-
-        :param names: NameManager对象
-        :param num: 线程数
-        :param thread: 包含所有线程的list
-        :return:
-        '''
-        if names.is_not_exits():
-            print("check_schedule create")
-            names.create()
-
-        for i in range(num):
-            done = names.get_done_name_value(names.get_done_name(i))
-
-            if done == "True":
-                pass
-            else:
-                thread[i].set_num(i)
-
-                if i == 0:
-                    self.clear_all(names)
-                    names.create()
-                    thread[0].set_start_thread()
-                    thread[0].start()
-                elif i==num-1:
-                    thread[i].set_end_thread()
-                    thread[i].start()
-                else:
-                    thread[i].start()
-
-    def clear_all(self,names):
-        '''
-        清除对应names在redis中的数据
-        :param names:
-        :return:
-        '''
-        names.clear_all()
-"""
+                # self.thread_num +=1

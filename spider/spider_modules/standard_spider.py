@@ -4,23 +4,11 @@ import threading
 import logging
 import traceback
 import os
+import spider.spider_modules.name_manager as nm
+import datetime
+import time
 
-logger=logging.getLogger("spiderlog")
-logger.setLevel(logging.INFO)
-fh=logging.FileHandler("C:/File/ResultFile/spider.log")
-ch=logging.StreamHandler()
-
-log_file=open("C:/File/ResultFile/spider.log","a+",encoding="utf-8")
-fh.setLevel(logging.ERROR)
-ch.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-logger.addHandler(fh)
-logger.addHandler(ch)
-
-
-
+logger=logging.getLogger("logger")
 class StandardSpider(threading.Thread):
 
     def get(self,url):
@@ -30,21 +18,12 @@ class StandardSpider(threading.Thread):
         pass
 
 class attr:
-    def __init__(self,names):
+    def __init__(self,names,step):
         self.names = names
         # 标识线程是否是起始或结束线程
         self.start_thread = False
         self.end_thread = False
-        # 在redis中存储url的list的名称
-        self.put_list_name = ""
-        self.get_list_name = ""
-        # 线程之间的锁
-        self.put_condition = None
-        self.get_condition = None
-        # 标识线程是否已完成的值
-        self.put_done_name = ""
-        self.get_done_name = ""
-
+        self.step=step
 
     def is_start_thread(self):
         return self.start_thread
@@ -58,78 +37,42 @@ class attr:
     def set_end_thread(self):
         self.end_thread = True
 
-    def set_put_list_name(self,num):
-        self.put_list_name=self.names.get_list_name(num)
-
-    def get_put_list_name(self):
-        return self.put_list_name
-
-    def set_get_list_name(self,num):
-        self.get_list_name=self.names.get_list_name(num-1)
-
-    def get_get_list_name(self):
-        return self.get_list_name
-
-    def set_put_condition(self,num):
-        self.put_condition=self.names.get_condition(num)
-
-    def set_get_condition(self,num):
-        self.get_condition=self.names.get_condition(num-1)
-
-    def get_put_condition(self):
-       return self.put_condition
-
-    def get_get_condition(self):
-       return self.get_condition
-
-    def set_put_done_name(self,num):
-        self.put_done_name = self.names.get_done_name(num)
-
-    def set_get_done_name(self,num):
-        self.get_done_name = self.names.get_done_name(num-1)
-
-    def get_put_done_name(self):
-        return  self.put_done_name
-
-    def get_get_done_name(self):
-        return  self.get_done_name
-
 
 
 
 class ThreadingSpider(StandardSpider):
 
-    def __init__(self,names,attr):
+    def __init__(self,nm,attr):
         threading.Thread.__init__(self)
         self.attr=attr
-        self.names=names
+        self.nm=nm
+        self.url_increment=increment(self.nm)
 
     def run(self):
         logger.info("thread \'" + self.__class__.__name__ + "\' run as " + self.getName() + " ...")
 
         if self.attr.is_end_thread():
-            self.check_file(self.names)
+            self.check_file()
         while (True):
             url_0 = ""
             if not self.attr.is_start_thread():
-                if self.names.has_next(self.attr.get_get_list_name()):
-                    url_0 = self.names.get_url_redis(self.attr.get_get_list_name())
+                if self.nm.has_next(self.attr.step):
+                    url_0 = self.nm.get_url_redis(self.attr.step)
                 else:
                     if self.is_previous_done():
                         break
-                    self.attr.get_get_condition().acquire()
-                    self.attr.get_get_condition().wait()
-                    continue
+                    else:
+                        logger.info("当前任务已完成，等待新任务...")
+                        time.sleep(10)
+                        continue
             try:
+                logger.info("run url :"+url_0)
                 urls = self.get(url_0)
 
             except BaseException as e:
-                logger.error(self.getName()+" - "+url_0)
-                logger.error(e)
-                traceback.print_exc(file=log_file)
-
+                logger.error(self.getName()+" - "+url_0,exc_info = True)
                 logger.info("thread \'" + self.__class__.__name__ + "\' of " + self.getName()+" has err!!! get back!!!")
-                self.names.put_url_redis(self.attr.get_get_list_name(),url_0)
+                self.nm.put_url_redis(self.attr.step,url_0)
                 continue
 
             if  self.attr.is_end_thread():
@@ -140,27 +83,22 @@ class ThreadingSpider(StandardSpider):
             if self.attr.is_start_thread():
                 break
 
-        if not self.attr.is_end_thread():
-            self.done_put_notify()
-        else:
+        if  self.attr.is_end_thread():
             logger.info("thread \'" + self.__class__.__name__ + "\' of " + self.getName()+ " all finsh!!!")
-            self.change_put_done_name(True)
-            self.notify_main()
 
+        self.nm.set_done_name(self.attr.step, True)
 
     def write(self,urls):
-        self.file.write(urls)
+        self.file.write(self.nm.name+"##"+urls)
 
-    def change_put_done_name(self, bool):
-        self.names.set_done_name(self.attr.get_put_done_name(), bool)
 
     def is_previous_done(self):
         '''
         判断上一步的线程是否已完成
         :return:
         '''
-        get_done_name_value = self.names.get_done_name_value(self.attr.get_get_done_name())
-        return get_done_name_value == "True"
+
+        return self.nm.get_done_value(self.attr.step-1) == "True"
 
 
     def put_urls(self,urls):
@@ -170,57 +108,12 @@ class ThreadingSpider(StandardSpider):
         :return:
         '''
         for url in urls:
-            self.names.put_url_redis(self.attr.get_put_list_name(), url)
-        self.put_notifiy()
-
-    class NotifyThread(threading.Thread):
-        def __init__(self, condition):
-            threading.Thread.__init__(self)
-            self.condition=condition
-
-        def run(self):
-            if (self.condition.acquire()):
-                self.condition.notify()
-                self.condition.release()
-
-    def put_notifiy(self):
-        '''
-        唤醒下一步的线程
-        :return:
-        '''
-        self.NotifyThread(self.attr.get_put_condition()).start()
-
-    def done_put_notify(self):
-        '''
-        线程完成，将redis中的标识（done_name）的值设为True，然后唤醒下一步的线程
-        :return:
-        '''
-        while (True):
-            if (self.attr.get_put_condition().acquire()):
-                logger.info("thread \'" + self.__class__.__name__ + "\' of " + self.getName()+ " finsh! notify next thread!!!")
-                self.change_put_done_name(True)
-                self.attr.get_put_condition().notify_all()
-                self.attr.get_put_condition().release()
-                break
-
-        self.notify_main()
-
-    def notify_main(self):
-        '''
-        唤醒主线程
-        :return:
-        '''
-        while (True):
-            if (self.names.get_mian_condition().acquire()):
-                logger.info("thread \'" + self.__class__.__name__ + "\' of " + self.getName()+ " finsh! notify main thread!!!")
-                self.names.get_mian_condition().notify_all()
-                self.names.get_mian_condition().release()
-                break
+            self.nm.put_url_redis(self.attr.step+1, url)
 
 
-    def check_file(self, names):
+    def check_file(self):
         file_path_ = "C:/SpiderResultFile/"
-        file_path = "C:/SpiderResultFile/" + names.name
+        file_path = "C:/SpiderResultFile/" + self.nm.name
         file_name = "part-"
         file_num = 0
         if not os.path.exists(file_path):
@@ -231,4 +124,64 @@ class ThreadingSpider(StandardSpider):
             list = os.listdir(file_path)
             file_num = list.__len__()
         self.file = open(file_path + "/" + file_name + str(file_num).zfill(4), "a+", encoding="utf-8")
+
+class increment():
+    def __init__(self,names):
+        self.nm=names
+        self.format="%Y-%m-%d"
+        self.default_date="2018-12-01"
+        self.current_date=None
+        self.last_date=None
+
+    def get_date(self):
+        ld = self.nm.get_last_date()
+        if ld == None:
+            self.last_date = datetime.datetime.strptime(self.default_date, self.format)
+        else:
+            self.last_date = datetime.datetime.strptime(ld, self.format)
+
+    def is_increment(self,url,date):
+        '''
+            判断所传的url是否是增量，会按照传入的日期判断
+        :param url:
+        :param date: 日期格式为：XXXX-XX-XX
+        :return:
+        '''
+
+        if self.last_date ==None:
+            self.get_date()
+        url_date=datetime.datetime.strptime(date,self.format)
+        if url_date>=self.last_date:
+            result=self.nm.is_increment(url)
+            if result :
+                if self.current_date == None:
+                    self.current_date = url_date
+                if url_date > self.current_date:
+                    self.current_date = url_date
+            return  result
+        else:
+            return False
+
+    def date_check(self):
+        if self.current_date != None:
+            while True:
+                if self.nm.get_lock():
+                    condition_date_str=self.nm.get_last_date()
+                    if condition_date_str == None:
+                        condition_date = datetime.datetime.strptime(self.default_date, self.format)
+                    else:
+                        condition_date = datetime.datetime.strptime(condition_date_str, self.format)
+                    if self.current_date>condition_date:
+                        if self.current_date>datetime.datetime.now():
+                            self.current_date=datetime.datetime.now()
+                        self.nm.set_last_date(str(self.current_date.date()))
+                    self.nm.release_lock()
+                    break
+                else:
+                    time.sleep(1)
+
+if __name__ == '__main__':
+    print(datetime.datetime.now())
+
+
 

@@ -18,9 +18,34 @@ def get_html(url):
 class first(ss.ThreadingSpider):
 
     def get(self,url):
+        print("111111111")
         urls = []
-        for i in range(1000):
-            urls.append(i)
+        url = "http://soeasycenter.com/newTender"
+
+        parm = {
+            "periodTime": " 0.0",
+            "pageNum": "1",
+            "pageSize": "500",
+        }
+
+        data = requests.post(url, data=parm)
+        data.encoding = "utf-8"
+        data = data.text
+
+        soup = BeautifulSoup(data, "html.parser")
+
+        table = soup.find("table", class_="table table-striped")
+        for tr_tag in table.find_all("tr"):
+            a_tag = tr_tag.find("a")
+            if a_tag == None:
+                continue
+            url1 = "http://soeasycenter.com" + a_tag["href"]
+            tds = tr_tag.find_all("td")
+            date = tds[3].text
+            se=self.url_increment.is_increment(url1,date)
+            print(se)
+            if se:
+                urls.append(url1)
         return urls
 
 class second(ss.ThreadingSpider):
@@ -34,69 +59,31 @@ class second(ss.ThreadingSpider):
 
 class thrid(ss.ThreadingSpider):
     def get(self,url):
+        print("222222")
+        html = get_html(url)
 
-        line=url+"_th"
+        soup = BeautifulSoup(html, "html.parser")
+
+        div_tag = soup.find("div", class_="maincontent")
+        fdiv = div_tag.find("div", class_="mytop")
+        title = fdiv.find("h4").get_text().strip()
+        date = fdiv.find("p").get_text().strip()
+        b_num = re.search("发布时间：", date).span()
+        e_num = re.search("来源：", date).span()
+        date = date[b_num[1]:e_num[0]].strip()
+        text = div_tag.find("div", class_="mymain").get_text().strip()
+        text = "".join(text.split())
+
+        line = url + "##" + date + "##" + title + "##" + text+"\n"
         return line
 
 
+
+
+
 if __name__ == '__main__':
 
-
-    j = job.Job("test8")
+    j = job.Job("test0103")
     j.set_speed()
-    j.submit("first","second","thrid",pyname="test")
+    j.submit("first","thrid",pyname="test")
 
-
-'''
-
-class tt(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-
-    def run(self):
-        print("hello: " )
-        time.sleep(100)
-
-def sayhello(a):
-    print("hello: "+a)
-    time.sleep(2)
-
-if __name__ == '__main__':
-    seed = ["a", "b", "c"]
-    start1 = time.time()
-    for each in seed:
-        sayhello(each)
-    end1 = time.time()
-    print("time1: " + str(end1 - start1))
-    start2 = time.time()
-    with ThreadPoolExecutor(3) as executor:
-        for each in seed:
-            f=executor.submit(sayhello,each)
-            print(f.result())
-
-
-    end2 = time.time()
-    print("time2: " + str(end2 - start2))
-    start3 = time.time()
-    with ThreadPoolExecutor(3) as executor1:
-        executor1.map(sayhello,each)
-    end3 = time.time()
-    print("time3: " + str(end3 - start3))
-    
-f=__import__("spider_modules.spider_thread.fpo",fromlist=True)
-
-first=getattr(f,"first")
-#print(first())
-di={}
-
-di.setdefault(di.__len__(),"sfsf")
-di.setdefault(di.__len__(),"dfsdf")
-di.setdefault(di.__len__(),"sdfsdf")
-di.setdefault(di.__len__(),"dsfsdf")
-print(di)
-for i in di:
-    print(i)
-
-#threads=getattr(f,"first")
-
-'''

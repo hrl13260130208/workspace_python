@@ -61,8 +61,18 @@ def test2():
     model = word2vec.Word2Vec.load(output)
     print(model["ESALQ/USP\""])
 
+
+def test3():
+    output = "C:/File/ResultFile/input/tensorflow/word2vec/output/out.model"
+    model = word2vec.Word2Vec.load(output)
+    str1="Mechanical Engineering Faculty, Tarbiat Modares University"
+    str2="Mechanical Engineering Department, Faculty of Engineering, Tarbiat Modares University"
+    score = model.wv.n_similarity(str1.split(" "), str2.split(" "))
+    print(score)
+
 if __name__ == '__main__':
-    test()
+    test3()
+
 
 
 

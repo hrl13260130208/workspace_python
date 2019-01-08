@@ -1,12 +1,13 @@
 
 import spider.spider_modules.standard_spider as ss
+import logging
+
 
 class Thread_Factor(object):
-    def __init__(self):
+    def __init__(self,nm):
         self.threads=[]
+        self.nm = nm
 
-    def set_names(self,names):
-        self.names = names
 
     def set_thread(self,thread):
         self.threads.append(thread)
@@ -15,20 +16,13 @@ class Thread_Factor(object):
         return self.threads.__len__()
 
     def get_thread(self,index):
-        attr=ss.attr(self.names)
+        attr=ss.attr(self.nm,index)
         if index == 0:
             attr.set_start_thread()
         elif index== self.threads_len()-1:
             attr.set_end_thread()
 
-        attr.set_put_list_name(index)
-        attr.set_put_done_name(index)
-        attr.set_put_condition(index)
-        attr.set_get_list_name(index)
-        attr.set_get_done_name(index)
-        attr.set_get_condition(index)
-
-        return self.threads[index](self.names,attr)
+        return self.threads[index](self.nm,attr)
 
 
 

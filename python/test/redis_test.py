@@ -1,18 +1,40 @@
 import redis
 
-r=redis.Redis(host="127.0.0.1",port=6379,decode_responses=True)
 
-print(r.get("dfsdf"))
-print(r.keys())
+def clear_all(names):
+    for key in r.keys(names.name+"*"):
+        r.delete( key )
 
-for key in r.keys():
-    #print(key+" "+r.type(key))
-    if r.type(key) == "string":
-        print(key+":",r.get(key))
-    elif r.type(key) == "list":
-        print(key+":",r.lrange(key,0,100))
+r=redis.Redis(host="127.0.0.1",port=6379,db=8,decode_responses=True)
+'''
+for key in r.keys("ccgp-jiangsu*"):
+    r.delete(key)
+'''
+def run():
+    print(r.keys())
+
+    for key in r.keys():
+        #print(key+" "+r.type(key))
+        if r.type(key) == "string":
+            print(key+":",r.get(key))
+        elif r.type(key) == "list":
+            print(key+":",r.lrange(key,0,100))
+        elif r.type(key) == "set":
+            print(key+":",r.smembers(key))
+
 
 #r.flushall()
+
+if __name__ == '__main__':
+    r.flushall()
+    run()
+    # print(r.delete("cnpiec_49*"))
+    # name="cnpiec_49"
+    # keys = r.keys(name + "*")
+    # for key in keys:
+    #     #if key!=name+"_date" and key!=name+"_set":
+    #     r.delete(key)
+
 
 '''
 #r.set("test","python_redis")

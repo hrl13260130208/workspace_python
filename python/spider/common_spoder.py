@@ -14,6 +14,10 @@ import redis
         put_thread会从初始页面获取下一级需要的url，并将其放到redis中
     然后如果put_thread生产的url就是内容页面，则创建一个get_thread（从内容页爬取数据）
         否则启动一个middle_thread，从上一个url中获取下一个url中并存入redis中
+        
+    锁机制和命名机制：两个线程之间通过锁来进行相互间的等待和唤醒。命名机制：初始化的时候会创建
+    一个_done和一个_list的列表，存储所有需要的名称（一个表示线程是否完成的值的名称，一个产生
+    的url的存储列表的名称）
 
 中途退出处理：如果程序因为各种原因退出，重新启动程序时，其会到redis中去查询上次爬取的进度，然后接着之前的继续爬取
 
@@ -24,6 +28,11 @@ import redis
 redis_ = redis.Redis(host="127.0.0.1",port=6379,decode_responses=True)
 
 class Put_Thread(threading.Thread):
+    '''
+    构造方法：url 爬取路径
+    names NameManager对象
+    num 执行顺序从0开始（该对象一般为0）
+    '''
     def __init__(self,url=None,names=None,num=None):
         threading.Thread.__init__(self)
         self.names=names
@@ -31,6 +40,12 @@ class Put_Thread(threading.Thread):
         self.url=url
 
     def run(self):
+        '''
+
+        获取页面信息、存入redis中
+        需要单独实现获取页面信息的方法
+        :return:
+        '''
         print("Put_Thread start...")
         urls=put_url_0(self.url)
         name=self.names.get_list_name(self.num)
@@ -47,13 +62,26 @@ class Put_Thread(threading.Thread):
                 break
 
 class Get_Thread(threading.Thread):
-    def __init__(self,fun=None,names=None,num=None):
+
+    def __init__(self,  names=None, num=None, file=None):
+        '''
+        构造方法：  names NameManager对象
+        num  线程的执行顺序从0开始
+        file 写入的文件对象
+
+        '''
         threading.Thread.__init__(self)
-        self.fun=fun
-        self.names=names
-        self.num=num
+        self.names = names
+        self.num = num
+        self.file = file
 
     def run(self):
+        '''
+        从redis中获取url，从URL中获取页面信息，存入文件中
+        需要单独实现获取页面信息的方法和写入文件
+
+        :return:
+        '''
         print("Get_Thread start...")
         condition=self.names.get_condition(self.num-1)
         list_name=self.names.get_list_name(self.num-1)
@@ -64,7 +92,7 @@ class Get_Thread(threading.Thread):
 
                 if not redis_.llen(list_name) == 0:
                     url = get_url_redis(list_name)
-                    get_url_1(url)
+                    get_url_1(url,self.file)
                 else:
                     done_name_value = self.names.get_done_name_value( self.names.get_done_name( self.num ) )
                     if done_name_value=="True":
@@ -74,20 +102,32 @@ class Get_Thread(threading.Thread):
         print("get_thread:"+list_name+" done!")
 
 class Middle_Thread(threading.Thread):
-    def __init__(self,fun=None,names=None,num=None):
+    def __init__(self, names=None, num=None):
+        '''
+         构造方法：  names NameManager对象
+                    num  线程的执行顺序从0开始
+        :param names:
+        :param num:
+        '''
         threading.Thread.__init__(self)
-        self.fun=fun
-        self.names=names
-        self.num=num
+        self.names = names
+        self.num = num
 
 
     def run(self):
-        print("Middle_Thread start...")
-        before_condition=self.names.get_condition(self.num-1)
-        before_list_name=self.names.get_list_name(self.num-1)
+        '''
+        从redis中获取上一级的url
+        然后获取页面里的下一级的url（需要单独实现方法为：middle_url_1(url_0)）
+        然后将其放到redis中
 
-        after_condition=self.names.get_condition(self.num)
-        after_done_name=self.names.get_done_name( self.num )
+        :return:
+        '''
+        print("Middle_Thread start...")
+        before_condition = self.names.get_condition(self.num - 1)
+        before_list_name = self.names.get_list_name(self.num - 1)
+
+        after_condition = self.names.get_condition(self.num)
+        after_done_name = self.names.get_done_name(self.num)
 
         while (True):
             if (before_condition.acquire()):
@@ -100,16 +140,16 @@ class Middle_Thread(threading.Thread):
                         if url_0 is None:
                             break
                         else:
-                            urls=middle_url_1(url_0)
+                            urls = middle_url_1(url_0)
                             for url in urls:
-                                put_url_redis(name1,url)
+                                put_url_redis(name1, url)
                                 if (condition.acquire()):
                                     print("middle notify get")
                                     condition.notify_all()
                                     condition.release()
                 else:
-                    before_done_name_value = self.names.get_done_name_value( self.names.get_done_name( self.num - 1 ) )
-                    if before_done_name_value=="True":
+                    before_done_name_value = self.names.get_done_name_value(self.names.get_done_name(self.num - 1))
+                    if before_done_name_value == "True":
                         break
                     before_condition.wait()
                 before_condition.release()
@@ -120,25 +160,40 @@ class Middle_Thread(threading.Thread):
                 after_condition.notify_all()
                 after_condition.release()
                 break
-        print("get_thread:"+before_list_name + " done!")
+        print("get_thread:" + before_list_name + " done!")
 
 
 class Name_Manager(object):
+    '''
+    负责管理每一个线程向redis中存入数据的名称与线程之间的锁（condition对象）
+
+    '''
     condition=[]
+
     def __init__(self,name,num):
+        '''
+
+        :param name: 整爬虫的名称
+        :param num:  整爬虫的线程数
+        '''
         self.name=name
         self.num=num
         for i in range(num-1):
             self.condition.append( threading.Condition() )
 
     def create(self):
+        '''
+        在redis中创建爬虫需要的名称
+
+        :return:
+        '''
         redis_.set(self.name,"True")
         for i in range(self.num):
             if not i==0:
                 redis_.rpush(self.name+"_list",self.name+"_list_"+str(i))
 
             redis_.rpush(self.name + "_done", self.name+"_done_"+str(i))
-            redis_.set(self.name+"_str_"+str(i),str(False))
+            redis_.set(self.name+"_done_"+str(i),str(False))
 
 
     def get_condition(self,num):
@@ -161,6 +216,14 @@ def get_url_redis(name):
     return redis_.rpop(name)
 
 def check_schedule(names,num,thread):
+    '''
+    当程序重新启动的时候，检查之前程序爬取的进度，然后根据其进度启动对应的线程
+
+    :param names: NameManager对象
+    :param num: 线程数
+    :param thread: 包含所有线程的list
+    :return:
+    '''
     if redis_.get(names.name) == "None":
         print("check_schedule create")
         names.create()
@@ -179,25 +242,30 @@ def check_schedule(names,num,thread):
                 thread[i].start()
 
 def clear_all(names):
+    '''
+    清除对应names在redis中的数据
+    :param names:
+    :return:
+    '''
     for key in redis_.keys(names.name+"*"):
         redis_.delete( key )
 
 
 '''
 下面的方法对应着上面三个thread类在实际处理页面HTML的处理
-使用方法：将方法放入对应的thread的run方法的相应位置
+使用方法：直接编写方法，对应线程会调用该方法，put和middle需要返回一个包含url的list
 '''
 def put_url_0(url):
     print("请编写方法")
 
 
 #获取各个地区内公告的URLs
-def middle_url_1(names,num):
+def middle_url_1(url):
     print("请编写方法")
 
 
 #获取公告内的详细信息
-def get_url_1(names):
+def get_url_1(url,file):
     print("请编写方法")
 
 
@@ -212,18 +280,20 @@ if __name__ == '__main__':
     
     #用法示例
     
-    url = "http://cz.fjzfcg.gov.cn/3500/openbidlist/f9ebc6637c3641ee9017db2a94bfe5f0/"
+       url = " "
+    file_path = "C:/file/ResultFile/jxsggzy_spider_result.txt"
 
-    names=Name_Manager("t1",3)
+    names=Name_Manager("jxsggzy",2)
     thread=[]
+    f = open(file_path, "a+", encoding="utf-8")
 
     p=Put_Thread(names=names,num=0,url=url)
-    m=Middle_Thread(names=names,num=1)
-    g=Get_Thread(names=names,num=2)
+    #m=Middle_Thread(names=names,num=1)
+    g=Get_Thread(names=names,num=1,file=f)
 
     thread.append(p)
-    thread.append( m )
+    #thread.append( m )
     thread.append( g )
-    check_schedule(names,3,thread)
+    check_schedule(names,2,thread)
 
 '''
